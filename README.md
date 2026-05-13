@@ -22,7 +22,7 @@
 |------|------|
 | Framework | FastAPI |
 | Language | Python 3.14 |
-| DB | MySQL |
+| DB | PostgreSQL |
 | ORM | SQLAlchemy |
 | 버전관리 | Git / GitHub |
 
@@ -41,13 +41,13 @@
 ### 사전 요구사항
 
 - Python 3.10 이상
-- MySQL 설치 및 실행 중
+- PostgreSQL 설치 및 실행 중
 - Git 설치
 
 ### 1. 레포지토리 클론
 
 ```bash
-git clone https://github.com/your-org/CAU-SWE-BE.git
+git clone https://github.com/e2pi3/CAU-SWE-BE.git
 cd CAU-SWE-BE
 ```
 
