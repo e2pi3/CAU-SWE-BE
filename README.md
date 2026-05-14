@@ -80,11 +80,11 @@ cp .env.example .env
 `.env` 파일에 본인 DB 정보 입력:
 
 ```
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=본인비밀번호
-DB_NAME=본인DB명
+DB_HOST=
+DB_PORT= 
+DB_NAME=
+DB_USER=
+DB_PASSWORD=
 ```
 
 ### 5. 서버 실행
@@ -119,7 +119,8 @@ git checkout feature/my-part
 ```
 CAU-SWE-BE/
 ├── app/
-│   └── main.py          # 서버 진입점 (API 추가될수록 분리 예정)
+│   ├── main.py          # 서버 진입점 (API 추가될수록 분리 예정)
+│   └── db.py            # DB 커넥션
 ├── venv/                # 가상환경 (GitHub에 올라가지 않음)
 ├── .env                 # DB 접속 정보 (GitHub에 올라가지 않음)
 ├── .env.example         # .env 양식 (GitHub에 올라감)
