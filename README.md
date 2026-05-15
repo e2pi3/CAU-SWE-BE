@@ -80,6 +80,10 @@ cp .env.example .env
 `.env` 파일에 본인 DB 정보 입력:
 
 ```
+DB_HOST=
+DB_PORT=
+DB_NAME=
+DB_USER=
 DB_PASSWORD=
 ```
 
