@@ -1,3 +1,5 @@
+# DB 연결
+
 import asyncpg
 import os
 from dotenv import load_dotenv
@@ -15,5 +17,6 @@ DATABASE_URL = (
 async def get_db(): #DB 연결 함수
     return await asyncpg.connect(
         DATABASE_URL,
-        ssl="require"
+        ssl="require",
+        statement_cache_size=0
     )
