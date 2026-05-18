@@ -56,16 +56,16 @@ async def root():
 @app.get("/cocktails/search")
 async def search_cocktails(q: str):
     pool = get_pool()
-    query = f"{q}%"
+    query = f"{q.lower()}%"
 
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT id, name, name_ko, glass_type
             FROM cocktail
-            WHERE LOWER(name) ILIKE $1 
-                OR LOWER(name_ko) ILIKE $1
-            LIMIT 20
+            WHERE LOWER(name) LIKE $1 
+                OR LOWER(name_ko) LIKE $1
+            LIMIT 10
             """,
             query
         )
