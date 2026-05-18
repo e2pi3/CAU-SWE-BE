@@ -17,19 +17,21 @@ app.add_middleware(
 async def root():
     return {"message": "CAU-SWE-BE API"}
 
-@app.get("/cocktails/search") # 칵테일 검색 API  ex) /cocktails/search?q=모히토
+# 칵테일 목록 조회 API  ex) /cocktails/search?q=모히토
+# 이름, 영어이름, 잔 종류만 반환합니다.
+@app.get("/cocktails/search")
 async def search_cocktails(q: str):
     db = await get_db()
 
     query = f"{q}%"
     rows = await db.fetch(
-        "SELECT id, name, name_ko, description FROM cocktail WHERE name ILIKE $1 OR name_ko ILIKE $2",
+        "SELECT id, name, name_ko, glass_type FROM cocktail WHERE name ILIKE $1 OR name_ko ILIKE $2",
         query, query
     )
 
     await db.close()
 
     return [
-        {"id": r["id"], "name": r["name"], "name_ko": r["name_ko"], "description": r["description"]}
+        {"id": r["id"], "name": r["name"], "name_ko": r["name_ko"], "glass_type": r["glass_type"]}
         for r in rows
     ]
