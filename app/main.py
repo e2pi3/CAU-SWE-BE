@@ -5,17 +5,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.db import init_db, close_db, get_pool
 import time
+import logging
 
 
 @asynccontextmanager 
 async def lifespan(app: FastAPI):
     await init_db()
-    print("DB pool initialized")
 
     yield  # 서버 실행 구간
 
     await close_db()
-    print("DB pool closed")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -27,6 +26,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+logger = logging.getLogger("app")
+logger.setLevel(logging.INFO)
 
 ######################
 # API 성능 측정 함수
@@ -38,7 +39,10 @@ async def log_requests(request, call_next):
 
     duration = (time.perf_counter() - start) * 1000
 
-    print(f"{request.url.path} took {duration:.2f}ms")
+    logger.info(f"{request.method} {request.url.path} took {duration:.2f}ms")
+
+    #로컬 테스트용
+    #print(f"{request.method} {request.url.path} took {duration:.2f}ms")
 
     return response
 #######################
@@ -52,6 +56,7 @@ async def root():
 
 
 # 칵테일 목록 조회 API  ex) /cocktails/search?q=모히토
+# 검색창에서 이름으로 검색 시 목록 나열
 # 이름, 영어이름, 잔 종류만 반환합니다.
 @app.get("/cocktails/search")
 async def search_cocktails(q: str):
