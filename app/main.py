@@ -63,7 +63,8 @@ async def search_cocktails(q: str):
             """
             SELECT id, name, name_ko, glass_type
             FROM cocktail
-            WHERE name ILIKE $1 OR name_ko ILIKE $1
+            WHERE LOWER(name) ILIKE $1 
+                OR LOWER(name_ko) ILIKE $1
             LIMIT 20
             """,
             query
