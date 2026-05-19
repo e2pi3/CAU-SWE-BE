@@ -42,7 +42,7 @@ async def log_requests(request, call_next):
     logger.info(f"{request.method} {request.url.path} took {duration:.2f}ms")
 
     #로컬 테스트용
-    #print(f"{request.method} {request.url.path} took {duration:.2f}ms")
+    print(f"INFO: {request.method} {request.url.path} took {duration:.2f}ms")
 
     return response
 #######################
