@@ -85,6 +85,14 @@ async def search_cocktails(q: str):
     ]
 
 
+# 리큐르 목록 조회 API  ex) /liqueur/search?q=미도리
+# 검색창에서 이름으로 검색 시 목록 나열
+# 이름, 영어이름만 반환합니다.
+@app.get("/liqueur/search")
+async def search_cocktails(q: str):
+    pass
+
+
 # 칵테일 정보 조회 API ex) /cocktails/info?id=11000
 # 칵테일 목록에서 칵테일 세부 조회로 넘어갈 때 사용
 # id로 조회하여 해당 칵테일 모든 정보 반환
