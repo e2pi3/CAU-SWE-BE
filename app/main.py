@@ -85,17 +85,57 @@ async def search_cocktails(q: str):
     ]
 
 
-##################################################
 # 칵테일 정보 조회 API ex) /cocktails/info?id=11000
 # 칵테일 목록에서 칵테일 세부 조회로 넘어갈 때 사용
 # id로 조회하여 해당 칵테일 모든 정보 반환
-
-# 설계구조설명
-# id를 입력받아서 칵테일 테이블에서 정보불러오기
-# 칵테일-재료 중간 테이블에서 재료 id 얻은다음
-# 재료 테이블에서 id로 재료 이름 가져와서 
-# 전부 JSON으로 응답
 @app.get("/cocktails/info")
 async def cocktail_info(id: str):
-    pass # 구현 예정
-##################################################
+    pool = get_pool()
+    query = id
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT 
+                c.id,
+                c.name,
+                c.name_ko,
+                c.recipe,
+                c.glass_type,
+                c.image_url,
+                c.abv,
+                c.description,
+                i.name_ko AS ingredient,
+                ci.amount
+            FROM cocktail c
+            JOIN cocktail_ingredient ci ON c.id = ci.cocktail_id
+            JOIN ingredient i ON ci.ingredient_id = i.id
+            WHERE c.id = $1
+            """, 
+            query
+        )
+
+    if not rows:
+        return None
+
+    first = rows[0]
+
+    ingredients = [
+        {
+            "ingredient": r["ingredient"],
+            "amount": r["amount"]
+        }
+        for r in rows
+    ]
+
+    return {
+        "id": first["id"],
+        "name": first["name"],
+        "name_ko": first["name_ko"],
+        "recipe": first["recipe"],
+        "glass_type": first["glass_type"],
+        "image_url": first["image_url"],
+        "abv": first["abv"],
+        "description": first["description"],
+        "ingredients": ingredients
+    }
