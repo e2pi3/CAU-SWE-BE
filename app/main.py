@@ -70,7 +70,7 @@ async def search_cocktails(q: str):
             FROM cocktail
             WHERE LOWER(name) LIKE $1 
                 OR LOWER(name_ko) LIKE $1
-            LIMIT 10
+            LIMIT 20
             """,
             query
         )
