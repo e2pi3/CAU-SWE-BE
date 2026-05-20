@@ -70,7 +70,7 @@ async def search_cocktails(q: str):
             FROM cocktail
             WHERE LOWER(name) LIKE $1 
                 OR LOWER(name_ko) LIKE $1
-            LIMIT 10
+            LIMIT 20
             """,
             query
         )
@@ -90,4 +90,52 @@ async def search_cocktails(q: str):
 # id로 조회하여 해당 칵테일 모든 정보 반환
 @app.get("/cocktails/info")
 async def cocktail_info(id: str):
-    pass # 구현 예정
+    pool = get_pool()
+    query = id
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT 
+                c.id,
+                c.name,
+                c.name_ko,
+                c.recipe,
+                c.glass_type,
+                c.image_url,
+                c.abv,
+                c.description,
+                i.name_ko AS ingredient,
+                ci.amount
+            FROM cocktail c
+            JOIN cocktail_ingredient ci ON c.id = ci.cocktail_id
+            JOIN ingredient i ON ci.ingredient_id = i.id
+            WHERE c.id = $1
+            """, 
+            query
+        )
+
+    if not rows:
+        return None
+
+    first = rows[0]
+
+    ingredients = [
+        {
+            "ingredient": r["ingredient"],
+            "amount": r["amount"]
+        }
+        for r in rows
+    ]
+
+    return {
+        "id": first["id"],
+        "name": first["name"],
+        "name_ko": first["name_ko"],
+        "recipe": first["recipe"],
+        "glass_type": first["glass_type"],
+        "image_url": first["image_url"],
+        "abv": first["abv"],
+        "description": first["description"],
+        "ingredients": ingredients
+    }
