@@ -60,17 +60,17 @@ async def root():
 @app.get("/search")
 async def search(q: str):
     pool = get_pool()
-    query = f"{q.lower()}%"
+    query = f"{q.lower().replace(' ', '')}%"
 
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
             (SELECT id::TEXT, name_ko, category FROM cocktail
-            WHERE LOWER(name_ko) LIKE $1 OR LOWER(name) LIKE $1
+            WHERE REPLACE(LOWER(name_ko), ' ', '') LIKE $1 OR REPLACE(LOWER(name), ' ', '') LIKE $1
             LIMIT 10)
             UNION ALL
             (SELECT id::TEXT, name_ko, category FROM ingredient
-            WHERE LOWER(name_ko) LIKE $1 OR LOWER(name) LIKE $1
+            WHERE REPLACE(LOWER(name_ko), ' ', '') LIKE $1 OR REPLACE(LOWER(name), ' ', '') LIKE $1
             LIMIT 10)
             """,
             query
