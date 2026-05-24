@@ -55,34 +55,35 @@ async def root():
 
 
 
-# 칵테일 목록 조회 API  ex) /cocktails/search?q=모히토
-# 검색창에서 이름으로 검색 시 목록 나열
-# 이름, 영어이름, 잔 종류만 반환합니다.
-@app.get("/cocktails/search")
-async def search_cocktails(q: str):
+# 통합 검색 API  ex) /search?q=모히토
+# 칵테일, 재료 테이블에서 이름으로 검색 (각 최대 10개)
+@app.get("/search")
+async def search(q: str):
     pool = get_pool()
     query = f"{q.lower()}%"
 
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, name, name_ko, glass_type
-            FROM cocktail
-            WHERE LOWER(name) LIKE $1 
-                OR LOWER(name_ko) LIKE $1
-            LIMIT 20
+            (SELECT id::TEXT, name_ko, category FROM cocktail
+            WHERE LOWER(name_ko) LIKE $1 OR LOWER(name) LIKE $1
+            LIMIT 10)
+            UNION ALL
+            (SELECT id::TEXT, name_ko, category FROM ingredient
+            WHERE LOWER(name_ko) LIKE $1 OR LOWER(name) LIKE $1
+            LIMIT 10)
             """,
             query
         )
 
     return [
-        {"id": r["id"], 
-         "name": r["name"], 
-         "name_ko": r["name_ko"], 
-         "glass_type": r["glass_type"]
+        {"id": r["id"],
+         "name_ko": r["name_ko"],
+         "category": r["category"]
          }
         for r in rows
     ]
+
 
 
 # 칵테일 정보 조회 API ex) /cocktails/info?id=11000
