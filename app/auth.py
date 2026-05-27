@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+import re
 import os
 from app.db import get_pool
 from pwdlib import PasswordHash
@@ -20,6 +21,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 
+# JWT 액세스 토큰 생성
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -27,6 +29,7 @@ def create_access_token(data: dict) -> str:
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
+# 토큰을 검증하고 현재 로그인된 사용자의 username 반환 (요청 검증)
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
     credentials_exception = HTTPException(
         status_code=401,
@@ -43,19 +46,44 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
     return username
 
 
+# DB에서 사용자를 조회하고 비밀번호를 검증, 실패 시 None 반환 (로그인 검증)
 async def authenticate_user(username: str, password: str):
     pool = get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM users WHERE username = $1", username)
+        row = await conn.fetchrow("SELECT password FROM users WHERE username = $1", username)
     if not row or not password_hash.verify(password, row["password"]):
         return None
     return row
 
 
 class SignupRequest(BaseModel): # 회원가입 시 적는 필드
-    username: str
-    password: str
-    nickname: str
+    
+    username: str # 4~20자, 영문 소문자/숫자/언더스코어 허용, 첫 글자는 영문자만
+    
+    password: str # 8~32자
+    
+    nickname: str # 2~12자, 한글/영문/숫자 허용, 공백/특수문자 금지
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if not re.match(r'^[a-z][a-z0-9_]{3,19}$', v):
+            raise ValueError("아이디는 4~20자, 영문 소문자로 시작하며 영문 소문자/숫자/언더스코어만 사용 가능합니다.")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if not (8 <= len(v) <= 32):
+            raise ValueError("비밀번호는 8~32자여야 합니다.")
+        return v
+
+    @field_validator("nickname")
+    @classmethod
+    def validate_nickname(cls, v: str) -> str:
+        if not re.match(r'^[가-힣a-zA-Z0-9]{2,12}$', v):
+            raise ValueError("닉네임은 2~12자, 한글/영문/숫자만 사용 가능합니다.")
+        return v
 
 
 class LoginRequest(BaseModel): # 로그인 시 적는 필드
