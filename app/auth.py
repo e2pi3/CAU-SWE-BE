@@ -3,6 +3,8 @@ from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, field_validator
 import re
 import os
+import secrets
+import hashlib
 from app.db import get_pool
 from pwdlib import PasswordHash
 from jose import jwt, JWTError
@@ -16,9 +18,20 @@ if not SECRET_KEY:
     raise ValueError("SECRET_KEY 환경변수가 설정되지 않았습니다.")
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 30 # 엑세스 토큰 만료시간 (분)
+REFRESH_TOKEN_EXPIRE_DAYS = 14 # 리프레시 토큰 만료시간 (일)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+
+# 리프레시 토큰 생성 (opaque random token)
+def create_refresh_token() -> str:
+    return secrets.token_urlsafe(64)
+
+
+# 토큰 SHA-256 해시 (DB 저장용)
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 # JWT 액세스 토큰 생성
@@ -50,7 +63,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
 async def authenticate_user(username: str, password: str):
     pool = get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT password FROM users WHERE username = $1", username)
+        row = await conn.fetchrow("SELECT id, password FROM users WHERE username = $1", username)
     if not row or not password_hash.verify(password, row["password"]):
         return None
     return row
@@ -91,6 +104,10 @@ class LoginRequest(BaseModel): # 로그인 시 적는 필드
     password: str
 
 
+class RefreshRequest(BaseModel): # 토큰 갱신/로그아웃 시 사용
+    refresh_token: str
+
+
 # 회원가입 API
 @router.post("/signup")
 async def signup(user: SignupRequest):
@@ -114,7 +131,61 @@ async def login(user: LoginRequest):
     if not saved_user:
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
     access_token = create_access_token({"sub": user.username})
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token = create_refresh_token()
+    token_hash = hash_token(refresh_token)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+            saved_user["id"], token_hash, expires_at,
+        )
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
+
+# 액세스 토큰 재발급 API (refresh token rotation)
+@router.post("/refresh")
+async def refresh(body: RefreshRequest):
+    token_hash = hash_token(body.refresh_token)
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT rt.id, rt.expires_at, u.username, u.id AS user_id
+            FROM refresh_tokens rt
+            JOIN users u ON rt.user_id = u.id
+            WHERE rt.token_hash = $1
+            """,
+            token_hash,
+        )
+        if not row:
+            raise HTTPException(status_code=401, detail="유효하지 않은 리프레시 토큰입니다.")
+        if row["expires_at"] < datetime.now(timezone.utc):
+            await conn.execute("DELETE FROM refresh_tokens WHERE id = $1", row["id"])
+            raise HTTPException(status_code=401, detail="만료된 리프레시 토큰입니다.")
+
+        # rotation: 기존 토큰 삭제 후 새 토큰 발급
+        new_refresh_token = create_refresh_token()
+        new_token_hash = hash_token(new_refresh_token)
+        new_expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        await conn.execute("DELETE FROM refresh_tokens WHERE id = $1", row["id"])
+        await conn.execute(
+            "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+            row["user_id"], new_token_hash, new_expires_at,
+        )
+
+    access_token = create_access_token({"sub": row["username"]})
+    return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
+
+
+# 로그아웃 API (리프레시 토큰 무효화)
+@router.post("/logout")
+async def logout(body: RefreshRequest):
+    token_hash = hash_token(body.refresh_token)
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM refresh_tokens WHERE token_hash = $1", token_hash)
+    return {"message": "로그아웃 성공"}
 
 
 # 자기 정보 확인 API
