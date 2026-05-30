@@ -164,15 +164,16 @@ async def refresh(body: RefreshRequest):
             await conn.execute("DELETE FROM refresh_tokens WHERE id = $1", row["id"])
             raise HTTPException(status_code=401, detail="만료된 리프레시 토큰입니다.")
 
-        # rotation: 기존 토큰 삭제 후 새 토큰 발급
+        # rotation: 기존 토큰 삭제 후 새 토큰 발급 (트랜잭션으로 묶어 원자성 보장)
         new_refresh_token = create_refresh_token()
         new_token_hash = hash_token(new_refresh_token)
         new_expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-        await conn.execute("DELETE FROM refresh_tokens WHERE id = $1", row["id"])
-        await conn.execute(
-            "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
-            row["user_id"], new_token_hash, new_expires_at,
-        )
+        async with conn.transaction():
+            await conn.execute("DELETE FROM refresh_tokens WHERE id = $1", row["id"])
+            await conn.execute(
+                "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+                row["user_id"], new_token_hash, new_expires_at,
+            )
 
     access_token = create_access_token({"sub": row["username"]})
     return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
