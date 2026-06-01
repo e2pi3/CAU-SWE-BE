@@ -109,6 +109,7 @@ async def cocktail_info(id: str):
                 c.image_url,
                 c.abv,
                 c.description,
+                i.id AS ingredient_id,
                 i.name_ko AS ingredient,
                 ci.amount
             FROM cocktail c
@@ -126,6 +127,7 @@ async def cocktail_info(id: str):
 
     ingredients = [
         {
+            "id": r["ingredient_id"],
             "ingredient": r["ingredient"],
             "amount": r["amount"]
         }
@@ -146,10 +148,10 @@ async def cocktail_info(id: str):
 
 
 
-# 재료 정보 조회 API  ex) /ingredients/info?id=1
-# id로 조회하여 재료 정보 및 해당 재료가 들어간 칵테일 목록 반환
+# 재료 정보 조회 API  ex) /ingredients/info?id=1&limit=5&offset=0
+# id로 조회하여 재료 정보 및 해당 재료가 들어간 칵테일 목록 반환 (페이지네이션 지원)
 @app.get("/ingredients/info")
-async def ingredient_info(id: int):
+async def ingredient_info(id: int, limit: int = 5, offset: int = 0):
     pool = get_pool()
 
     async with pool.acquire() as conn:
@@ -166,15 +168,26 @@ async def ingredient_info(id: int):
         if not ingredient:
             return None
 
-        # 해당 재료가 들어간 칵테일 목록 조회
+        # 해당 재료가 들어간 칵테일 전체 수 조회
+        cocktail_total = await conn.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM cocktail_ingredient
+            WHERE ingredient_id = $1
+            """,
+            id
+        )
+
+        # 해당 재료가 들어간 칵테일 목록 조회 (페이지네이션 적용)
         cocktails = await conn.fetch(
             """
             SELECT c.id::TEXT, c.name_ko, c.image_url
             FROM cocktail c
             JOIN cocktail_ingredient ci ON c.id = ci.cocktail_id
             WHERE ci.ingredient_id = $1
+            LIMIT $2 OFFSET $3
             """,
-            id
+            id, limit, offset
         )
 
     return {
@@ -183,6 +196,7 @@ async def ingredient_info(id: int):
         "name_ko": ingredient["name_ko"],
         "image_url": ingredient["image_url"],
         "category": ingredient["category"],
+        "cocktail_total": cocktail_total,
         "cocktails": [
             {
                 "id": c["id"],
@@ -195,7 +209,7 @@ async def ingredient_info(id: int):
 
 
 # 시간대에 따른 멘트 API
-# 마이페이지에서 사용자 칸에 표시될 멘트
+# 홈화면에서 시간대에 따라 표시될 멘트
 @app.get("/timement")
 async def get_greeting():
     # 한국 시간 기준 시간대 계산 (UTC+9)
