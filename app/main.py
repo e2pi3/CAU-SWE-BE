@@ -1,6 +1,6 @@
 # 메인 서버
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.db import init_db, close_db, get_pool
@@ -143,3 +143,54 @@ async def cocktail_info(id: str):
         "description": first["description"],
         "ingredients": ingredients
     }
+
+
+# 시간대에 따른 멘트 API
+# 마이페이지에서 사용자 칸에 표시될 멘트
+@app.get("/timement")
+async def get_greeting():
+    # 한국 시간 기준 시간대 계산 (UTC+9)
+    korea_hour = (int(time.time()) // 3600 + 9) % 24
+
+    if 20 <= korea_hour or korea_hour < 4:
+        message = "달빛이 드리운 밤, 칵테일 한잔"
+    elif 4 <= korea_hour < 12:
+        message = "좋은 아침이에요, 오늘도 화이팅!"
+    elif 12 <= korea_hour < 18:
+        message = "햇살 가득한 오후, 칵테일 한잔"
+    else: # 18 <= korea_hour < 20
+        message = "노을 빛 아래, 칵테일 한잔"
+
+    return {"message": message}
+
+
+
+# 무작위 칵테일 추천 API  ex) /cocktails/random?count=3
+# cocktail 테이블에서 count개만큼 랜덤 추출 (기본값: 1)
+@app.get("/cocktails/random")
+async def cocktail_random(count: int = 1):
+    if count < 1:
+        raise HTTPException(status_code=400, detail="count는 1 이상이어야 합니다.")
+
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id::TEXT, name_ko, category, image_url
+            FROM cocktail
+            ORDER BY RANDOM()
+            LIMIT $1
+            """,
+            count
+        )
+
+    return [
+        {
+            "id": r["id"],
+            "name_ko": r["name_ko"],
+            "category": r["category"],
+            "image_url": r["image_url"]
+        }
+        for r in rows
+    ]
