@@ -149,7 +149,7 @@ async def cocktail_info(id: str):
 # 재료 정보 조회 API  ex) /ingredients/info?id=1
 # id로 조회하여 재료 정보 및 해당 재료가 들어간 칵테일 목록 반환
 @app.get("/ingredients/info")
-async def ingredient_info(id: str):
+async def ingredient_info(id: int):
     pool = get_pool()
 
     async with pool.acquire() as conn:
