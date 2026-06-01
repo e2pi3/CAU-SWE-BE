@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.db import init_db, close_db, get_pool
 from app.auth import router as auth_router
+import asyncio
 import time
 import logging
 
@@ -154,41 +155,39 @@ async def cocktail_info(id: str):
 async def ingredient_info(id: int, limit: int = 5, offset: int = 0):
     pool = get_pool()
 
-    async with pool.acquire() as conn:
-        # 재료 기본 정보 조회
-        ingredient = await conn.fetchrow(
-            """
-            SELECT id, name, name_ko, image_url, category
-            FROM ingredient
-            WHERE id = $1
-            """,
-            id
-        )
+    # 두 쿼리를 별도 커넥션으로 병렬 실행 (RTT 절감)
+    async def fetch_ingredient():
+        async with pool.acquire() as conn:
+            return await conn.fetchrow(
+                """
+                SELECT id, name, name_ko, image_url, category
+                FROM ingredient
+                WHERE id = $1
+                """,
+                id
+            )
 
-        if not ingredient:
-            return None
+    async def fetch_cocktails():
+        # COUNT(*) OVER()로 전체 수와 페이지 결과를 한 쿼리로 조회
+        async with pool.acquire() as conn:
+            return await conn.fetch(
+                """
+                SELECT c.id::TEXT, c.name_ko, c.image_url,
+                       COUNT(*) OVER() AS cocktail_total
+                FROM cocktail c
+                JOIN cocktail_ingredient ci ON c.id = ci.cocktail_id
+                WHERE ci.ingredient_id = $1
+                LIMIT $2 OFFSET $3
+                """,
+                id, limit, offset
+            )
 
-        # 해당 재료가 들어간 칵테일 전체 수 조회
-        cocktail_total = await conn.fetchval(
-            """
-            SELECT COUNT(*)
-            FROM cocktail_ingredient
-            WHERE ingredient_id = $1
-            """,
-            id
-        )
+    ingredient, cocktails = await asyncio.gather(fetch_ingredient(), fetch_cocktails())
 
-        # 해당 재료가 들어간 칵테일 목록 조회 (페이지네이션 적용)
-        cocktails = await conn.fetch(
-            """
-            SELECT c.id::TEXT, c.name_ko, c.image_url
-            FROM cocktail c
-            JOIN cocktail_ingredient ci ON c.id = ci.cocktail_id
-            WHERE ci.ingredient_id = $1
-            LIMIT $2 OFFSET $3
-            """,
-            id, limit, offset
-        )
+    if not ingredient:
+        return None
+
+    cocktail_total = cocktails[0]["cocktail_total"] if cocktails else 0
 
     return {
         "id": ingredient["id"],
