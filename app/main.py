@@ -145,6 +145,55 @@ async def cocktail_info(id: str):
     }
 
 
+
+# 재료 정보 조회 API  ex) /ingredients/info?id=1
+# id로 조회하여 재료 정보 및 해당 재료가 들어간 칵테일 목록 반환
+@app.get("/ingredients/info")
+async def ingredient_info(id: str):
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # 재료 기본 정보 조회
+        ingredient = await conn.fetchrow(
+            """
+            SELECT id, name, name_ko, image_url, category
+            FROM ingredient
+            WHERE id = $1
+            """,
+            id
+        )
+
+        if not ingredient:
+            return None
+
+        # 해당 재료가 들어간 칵테일 목록 조회
+        cocktails = await conn.fetch(
+            """
+            SELECT c.id::TEXT, c.name_ko, c.image_url
+            FROM cocktail c
+            JOIN cocktail_ingredient ci ON c.id = ci.cocktail_id
+            WHERE ci.ingredient_id = $1
+            """,
+            id
+        )
+
+    return {
+        "id": ingredient["id"],
+        "name": ingredient["name"],
+        "name_ko": ingredient["name_ko"],
+        "image_url": ingredient["image_url"],
+        "category": ingredient["category"],
+        "cocktails": [
+            {
+                "id": c["id"],
+                "name_ko": c["name_ko"],
+                "image_url": c["image_url"]
+            }
+            for c in cocktails
+        ]
+    }
+
+
 # 시간대에 따른 멘트 API
 # 마이페이지에서 사용자 칸에 표시될 멘트
 @app.get("/timement")
