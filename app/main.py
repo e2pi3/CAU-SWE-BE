@@ -359,7 +359,7 @@ async def post_cocktail_rating(id: str, body: RatingRequest, current_user: str =
     }
 
 
-# 칵테일 댓글 조회 API  ex) /cocktails/comments?id=11000&limit=2&offset=0 -> 앞의 0개 댓글을 건너뛰고 최대 2개의 댓글 가져옴
+# 칵테일 댓글 조회 API  ex) /cocktails/comments?id=11000&limit=n&offset=0 -> 우선 n개의 댓글 가져옴
 # 댓글 수, 댓글 목록 반환 / 로그인 상태이면 내 댓글 여부, 좋아요 여부도 함께 반환
 # 정렬: 좋아요 많은 순 -> 최신순
 @app.get("/cocktails/comments")
@@ -396,7 +396,10 @@ async def get_cocktail_comments(
             JOIN users u ON cc.user_id = u.id
             LEFT JOIN comment_likes cl ON cc.id = cl.comment_id
             WHERE cc.cocktail_id = $1
-            ORDER BY like_count DESC, cc.created_at DESC
+            ORDER BY
+                CASE WHEN u.username = $4 THEN 0 ELSE 1 END ASC,
+                like_count DESC,
+                cc.created_at DESC
             LIMIT $2 OFFSET $3
             """,
             id, limit, offset, current_user
