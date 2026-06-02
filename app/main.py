@@ -1,10 +1,11 @@
 # 메인 서버
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.db import init_db, close_db, get_pool
-from app.auth import router as auth_router
+from app.auth import router as auth_router, get_current_user, get_optional_user
+from pydantic import BaseModel, field_validator
 import asyncio
 import time
 import logging
@@ -256,3 +257,89 @@ async def cocktail_random(count: int = 1):
         }
         for r in rows
     ]
+
+
+
+class RatingRequest(BaseModel): # 평점 제출 요청 바디
+    rating: int
+
+    @field_validator("rating")
+    @classmethod
+    def validate_rating(cls, v: int) -> int:
+        if not (1 <= v <= 5):
+            raise ValueError("평점은 1~5 사이여야 합니다.")
+        return v
+
+
+# 칵테일 평점 조회 API  ex) /cocktails/rating?id=11000
+# 평균 평점, 평점 수 반환 / 로그인 상태이면 내 평점도 함께 반환
+@app.get("/cocktails/rating")
+async def get_cocktail_rating(id: str, current_user: str | None = Depends(get_optional_user)):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        stats = await conn.fetchrow(
+            """
+            SELECT COALESCE(ROUND(AVG(rating)::numeric, 1), 0)::float AS avg_rating,
+                   COUNT(*) AS count
+            FROM cocktail_ratings
+            WHERE cocktail_id = $1
+            """,
+            id
+        )
+
+        user_rating = None
+        if current_user:
+            row = await conn.fetchrow(
+                """
+                SELECT r.rating
+                FROM cocktail_ratings r
+                JOIN users u ON r.user_id = u.id
+                WHERE r.cocktail_id = $1 AND u.username = $2
+                """,
+                id, current_user
+            )
+            if row:
+                user_rating = row["rating"]
+
+    return {
+        "avg_rating": stats["avg_rating"],
+        "count": stats["count"],
+        "user_rating": user_rating
+    }
+
+
+# 칵테일 평점 제출/수정 API  ex) /cocktails/rating?id=11000
+# 로그인 필수, 기존 평점 있으면 업데이트 (upsert)
+@app.post("/cocktails/rating")
+async def post_cocktail_rating(id: str, body: RatingRequest, current_user: str = Depends(get_current_user)):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow("SELECT id FROM users WHERE username = $1", current_user)
+        if not user_row:
+            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+        await conn.execute(
+            """
+            INSERT INTO cocktail_ratings (cocktail_id, user_id, rating, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (cocktail_id, user_id)
+            DO UPDATE SET rating = EXCLUDED.rating, updated_at = NOW()
+            """,
+            id, user_row["id"], body.rating
+        )
+
+        stats = await conn.fetchrow(
+            """
+            SELECT ROUND(AVG(rating)::numeric, 1)::float AS avg_rating,
+                   COUNT(*) AS count
+            FROM cocktail_ratings
+            WHERE cocktail_id = $1
+            """,
+            id
+        )
+
+    return {
+        "avg_rating": stats["avg_rating"],
+        "count": stats["count"],
+        "user_rating": body.rating
+    }

@@ -22,6 +22,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30 # 엑세스 토큰 만료시간 (분)
 REFRESH_TOKEN_EXPIRE_DAYS = 14 # 리프레시 토큰 만료시간 (일)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
 
 
 # 리프레시 토큰 생성 (opaque random token)
@@ -40,6 +41,18 @@ def create_access_token(data: dict) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+# 토큰이 없거나 유효하지 않으면 None 반환 (선택적 인증용)
+async def get_optional_user(token: str | None = Depends(oauth2_scheme_optional)) -> str | None:
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        return username
+    except JWTError:
+        return None
 
 
 # 토큰을 검증하고 현재 로그인된 사용자의 username 반환 (요청 검증)
