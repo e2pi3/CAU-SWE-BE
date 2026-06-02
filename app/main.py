@@ -271,6 +271,20 @@ class RatingRequest(BaseModel): # 평점 제출 요청 바디
         return v
 
 
+class CommentRequest(BaseModel): # 댓글 제출 요청 바디
+    comment: str
+
+    @field_validator("comment")
+    @classmethod
+    def validate_comment(cls, v: str) -> str:
+        comment = v.strip()
+        if not comment:
+            raise ValueError("댓글 내용을 입력해주세요.")
+        if len(comment) > 100:
+            raise ValueError("댓글은 100자 이하로 입력해주세요.")
+        return comment
+
+
 # 칵테일 평점 조회 API  ex) /cocktails/rating?id=11000
 # 평균 평점, 평점 수 반환 / 로그인 상태이면 내 평점도 함께 반환
 @app.get("/cocktails/rating")
@@ -343,3 +357,104 @@ async def post_cocktail_rating(id: str, body: RatingRequest, current_user: str =
         "count": stats["count"],
         "user_rating": body.rating
     }
+
+
+# 칵테일 댓글 조회 API  ex) /cocktails/comments?id=11000&limit=2&offset=0 -> 앞의 0개 댓글을 건너뛰고 최대 2개의 댓글 가져옴
+# 댓글 수, 댓글 목록 반환 / 로그인 상태이면 내 댓글 여부도 함께 반환
+@app.get("/cocktails/comments")
+async def get_cocktail_comments(
+    id: str,
+    limit: int = 2,
+    offset: int = 0,
+    current_user: str | None = Depends(get_optional_user)
+):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                cc.id,
+                u.username,
+                u.nickname,
+                cc.content,
+                cc.created_at,
+                cc.updated_at,
+                COUNT(*) OVER() AS total_count
+            FROM comment cc
+            JOIN users u ON cc.user_id = u.id
+            WHERE cc.cocktail_id = $1
+            ORDER BY cc.created_at DESC
+            LIMIT $2 OFFSET $3
+            """,
+            id, limit, offset
+        )
+
+    return {
+        "count": rows[0]["total_count"] if rows else 0,
+        "comments": [
+            {
+                "id": r["id"],
+                "username": r["username"][:3] + "****",
+                "nickname": r["nickname"],
+                "content": r["content"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "is_mine": current_user == r["username"] if current_user else False
+            }
+            for r in rows
+        ]
+    }
+
+
+# 칵테일 댓글 제출/수정 API  ex) /cocktails/comments?id=11000
+# 로그인 필수, 기존 댓글 있으면 업데이트 (upsert)
+@app.post("/cocktails/comments")
+async def post_cocktail_comment(id: str, body: CommentRequest, current_user: str = Depends(get_current_user)):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow("SELECT id FROM users WHERE username = $1", current_user)
+        if not user_row:
+            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+        comment = await conn.fetchrow(
+            """
+            INSERT INTO comment (cocktail_id, user_id, content, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (cocktail_id, user_id)
+            DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
+            RETURNING id, content, created_at, updated_at
+            """,
+            id, user_row["id"], body.comment
+        )
+
+    return {
+        "id": comment["id"],
+        "content": comment["content"],
+        "created_at": comment["created_at"],
+        "updated_at": comment["updated_at"]
+    }
+
+
+# 칵테일 댓글 삭제 API  ex) /cocktails/comments?id=11000
+# 로그인 필수, 본인 댓글만 삭제 가능
+@app.delete("/cocktails/comments")
+async def delete_cocktail_comment(id: str, current_user: str = Depends(get_current_user)):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow("SELECT id FROM users WHERE username = $1", current_user)
+        if not user_row:
+            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+        deleted = await conn.fetchrow(
+            """
+            DELETE FROM comment
+            WHERE cocktail_id = $1 AND user_id = $2
+            RETURNING id
+            """,
+            id, user_row["id"]
+        )
+
+        if not deleted:
+            raise HTTPException(status_code=404, detail="삭제할 댓글이 없습니다.")
+
+    return {"id": deleted["id"]}
