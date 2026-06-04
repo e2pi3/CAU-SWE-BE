@@ -93,34 +93,43 @@ async def search(q: str):
 
 # 칵테일 정보 조회 API ex) /cocktails/info?id=11000
 # 칵테일 목록에서 칵테일 세부 조회로 넘어갈 때 사용
-# id로 조회하여 해당 칵테일 모든 정보 반환
+# id로 조회하여 해당 칵테일 모든 정보 반환 / 조회 시 view 1 증가
 @app.get("/cocktails/info")
 async def cocktail_info(id: str):
     pool = get_pool()
-    query = id
 
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT 
-                c.id,
-                c.name,
-                c.name_ko,
-                c.recipe,
-                c.glass_type,
-                c.image_url,
-                c.abv,
-                c.description,
-                i.id AS ingredient_id,
-                i.name_ko AS ingredient,
-                ci.amount
-            FROM cocktail c
-            JOIN cocktail_ingredient ci ON c.id = ci.cocktail_id
-            JOIN ingredient i ON ci.ingredient_id = i.id
-            WHERE c.id = $1
-            """, 
-            query
-        )
+    async def fetch_info():
+        async with pool.acquire() as conn:
+            return await conn.fetch(
+                """
+                SELECT
+                    c.id,
+                    c.name,
+                    c.name_ko,
+                    c.recipe,
+                    c.glass_type,
+                    c.image_url,
+                    c.abv,
+                    c.description,
+                    i.id AS ingredient_id,
+                    i.name_ko AS ingredient,
+                    ci.amount
+                FROM cocktail c
+                JOIN cocktail_ingredient ci ON c.id = ci.cocktail_id
+                JOIN ingredient i ON ci.ingredient_id = i.id
+                WHERE c.id = $1
+                """,
+                id
+            )
+
+    async def increment_view():
+        async with pool.acquire() as conn:
+            return await conn.fetchval(
+                "UPDATE cocktail SET view = view + 1 WHERE id = $1 RETURNING view",
+                id
+            )
+
+    rows, new_view = await asyncio.gather(fetch_info(), increment_view())
 
     if not rows:
         return None
@@ -145,6 +154,7 @@ async def cocktail_info(id: str):
         "image_url": first["image_url"],
         "abv": first["abv"],
         "description": first["description"],
+        "view": new_view,
         "ingredients": ingredients
     }
 
@@ -257,6 +267,49 @@ async def cocktail_random(count: int = 1):
         }
         for r in rows
     ]
+
+
+
+# 조회수 기반 칵테일 랭킹 API  ex) /cocktails/ranking/views?limit=10&offset=0
+# view 컬럼 내림차순 정렬, 페이지네이션 지원
+@app.get("/cocktails/ranking/views")
+async def cocktail_ranking_views(limit: int = 10, offset: int = 0):
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="limit은 1 이상이어야 합니다.")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset은 0 이상이어야 합니다.")
+
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id::TEXT, name, name_ko, image_url, view,
+                   COUNT(*) OVER() AS total
+            FROM cocktail
+            WHERE view > 0
+            ORDER BY view DESC
+            LIMIT $1 OFFSET $2
+            """,
+            limit, offset
+        )
+
+    total = rows[0]["total"] if rows else 0
+
+    return {
+        "total": total,
+        "cocktails": [
+            {
+                "rank": offset + i + 1,
+                "id": r["id"],
+                "name": r["name"],
+                "name_ko": r["name_ko"],
+                "image_url": r["image_url"],
+                "view": r["view"]
+            }
+            for i, r in enumerate(rows)
+        ]
+    }
 
 
 
