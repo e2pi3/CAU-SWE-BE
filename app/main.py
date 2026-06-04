@@ -250,7 +250,7 @@ async def cocktail_random(count: int = 1):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id::TEXT, name_ko, category, image_url
+            SELECT id::TEXT, name, name_ko, image_url, category
             FROM cocktail
             ORDER BY RANDOM()
             LIMIT $1
@@ -261,9 +261,10 @@ async def cocktail_random(count: int = 1):
     return [
         {
             "id": r["id"],
+            "name": r["name"],
             "name_ko": r["name_ko"],
-            "category": r["category"],
-            "image_url": r["image_url"]
+            "image_url": r["image_url"],
+            "category": r["category"]
         }
         for r in rows
     ]
@@ -284,7 +285,7 @@ async def cocktail_ranking_views(limit: int = 10, offset: int = 0):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id::TEXT, name, name_ko, image_url, view,
+            SELECT id::TEXT, name, name_ko, image_url, category, view,
                    COUNT(*) OVER() AS total
             FROM cocktail
             WHERE view > 0
@@ -305,6 +306,7 @@ async def cocktail_ranking_views(limit: int = 10, offset: int = 0):
                 "name": r["name"],
                 "name_ko": r["name_ko"],
                 "image_url": r["image_url"],
+                "category": r["category"],
                 "view": r["view"]
             }
             for i, r in enumerate(rows)
