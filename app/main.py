@@ -8,7 +8,6 @@ from app.auth import router as auth_router, get_current_user, get_optional_user
 from pydantic import BaseModel, field_validator
 import asyncio
 import time
-import logging
 
 
 @asynccontextmanager
@@ -31,9 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-logger = logging.getLogger("app")
-logger.setLevel(logging.INFO)
-
 ######################
 # API 성능 측정 함수
 @app.middleware("http")
@@ -44,9 +40,6 @@ async def log_requests(request, call_next):
 
     duration = (time.perf_counter() - start) * 1000
 
-    logger.info(f"{request.method} {request.url.path} took {duration:.2f}ms")
-
-    #로컬 테스트용
     print(f"INFO: {request.method} {request.url.path} took {duration:.2f}ms")
 
     return response
@@ -238,12 +231,50 @@ async def get_greeting():
 
 
 
+# 평점 기반 칵테일 랭킹 API  ex) /cocktails/ranking/rating?limit=10&offset=0
+# 평점이 있는 칵테일만 대상, 평균 평점 높은 순 → 이름순
+@app.get("/cocktails/ranking/rating")
+async def cocktail_ranking_by_rating(limit: int = 10, offset: int = 0):
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT c.id::TEXT, c.name, c.name_ko, c.category, c.image_url,
+                   ROUND(AVG(r.rating)::numeric, 1)::float AS avg_rating,
+                   COUNT(*) OVER() AS total
+            FROM cocktail c
+            JOIN cocktail_ratings r ON c.id = r.cocktail_id
+            GROUP BY c.id, c.name, c.name_ko, c.category, c.image_url
+            ORDER BY avg_rating DESC, c.name_ko ASC
+            LIMIT $1 OFFSET $2
+            """,
+            limit, offset
+        )
+
+    return {
+        "total": rows[0]["total"] if rows else 0,
+        "cocktails": [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "name_ko": r["name_ko"],
+                "category": r["category"],
+                "image_url": r["image_url"],
+                "avg_rating": r["avg_rating"]
+            }
+            for r in rows
+        ]
+    }
+
+
+
 # 무작위 칵테일 추천 API  ex) /cocktails/random?count=3
 # cocktail 테이블에서 count개만큼 랜덤 추출 (기본값: 1)
 @app.get("/cocktails/random")
 async def cocktail_random(count: int = 1):
-    if count < 1:
-        raise HTTPException(status_code=400, detail="count는 1 이상이어야 합니다.")
+    if count < 1 or count > 10:
+        raise HTTPException(status_code=400, detail="count는 1~10 사이여야 합니다.")
 
     pool = get_pool()
 
@@ -346,34 +377,22 @@ class CommentRequest(BaseModel): # 댓글 제출 요청 바디
 async def get_cocktail_rating(id: str, current_user: str | None = Depends(get_optional_user)):
     pool = get_pool()
     async with pool.acquire() as conn:
-        stats = await conn.fetchrow(
+        row = await conn.fetchrow(
             """
-            SELECT COALESCE(ROUND(AVG(rating)::numeric, 1), 0)::float AS avg_rating,
-                   COUNT(*) AS count
-            FROM cocktail_ratings
-            WHERE cocktail_id = $1
+            SELECT COALESCE(ROUND(AVG(r.rating)::numeric, 1), 0)::float AS avg_rating,
+                   COUNT(*) AS count,
+                   MAX(CASE WHEN u.username = $2 THEN r.rating END) AS user_rating
+            FROM cocktail_ratings r
+            LEFT JOIN users u ON r.user_id = u.id
+            WHERE r.cocktail_id = $1
             """,
-            id
+            id, current_user
         )
 
-        user_rating = None
-        if current_user:
-            row = await conn.fetchrow(
-                """
-                SELECT r.rating
-                FROM cocktail_ratings r
-                JOIN users u ON r.user_id = u.id
-                WHERE r.cocktail_id = $1 AND u.username = $2
-                """,
-                id, current_user
-            )
-            if row:
-                user_rating = row["rating"]
-
     return {
-        "avg_rating": stats["avg_rating"],
-        "count": stats["count"],
-        "user_rating": user_rating
+        "avg_rating": row["avg_rating"],
+        "count": row["count"],
+        "user_rating": row["user_rating"]
     }
 
 
@@ -522,17 +541,12 @@ async def like_comment(comment_id: int, current_user: str = Depends(get_current_
         if not comment_row:
             raise HTTPException(status_code=404, detail="댓글을 찾을 수 없습니다.")
 
-        existing = await conn.fetchrow(
-            "SELECT 1 FROM comment_like WHERE comment_id = $1 AND user_id = $2",
+        result = await conn.fetchrow(
+            "INSERT INTO comment_like (comment_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING comment_id",
             comment_id, user_row["id"]
         )
-        if existing:
+        if not result:
             raise HTTPException(status_code=409, detail="이미 좋아요한 댓글입니다.")
-
-        await conn.execute(
-            "INSERT INTO comment_like (comment_id, user_id) VALUES ($1, $2)",
-            comment_id, user_row["id"]
-        )
 
         like_count = await conn.fetchval(
             "SELECT COUNT(*) FROM comment_like WHERE comment_id = $1",
