@@ -240,13 +240,12 @@ async def cocktail_ranking_by_rating(limit: int = 10, offset: int = 0):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT c.id::TEXT, c.name_ko, c.category, c.image_url,
+            SELECT c.id::TEXT, c.name, c.name_ko, c.category, c.image_url,
                    ROUND(AVG(r.rating)::numeric, 1)::float AS avg_rating,
-                   COUNT(r.rating) AS rating_count,
                    COUNT(*) OVER() AS total
             FROM cocktail c
             JOIN cocktail_ratings r ON c.id = r.cocktail_id
-            GROUP BY c.id, c.name_ko, c.category, c.image_url
+            GROUP BY c.id, c.name, c.name_ko, c.category, c.image_url
             ORDER BY avg_rating DESC, c.name_ko ASC
             LIMIT $1 OFFSET $2
             """,
@@ -258,11 +257,11 @@ async def cocktail_ranking_by_rating(limit: int = 10, offset: int = 0):
         "cocktails": [
             {
                 "id": r["id"],
+                "name": r["name"],
                 "name_ko": r["name_ko"],
                 "category": r["category"],
                 "image_url": r["image_url"],
-                "avg_rating": r["avg_rating"],
-                "rating_count": r["rating_count"]
+                "avg_rating": r["avg_rating"]
             }
             for r in rows
         ]
